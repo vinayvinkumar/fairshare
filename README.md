@@ -80,7 +80,10 @@ not a durable database, so PostgreSQL is strongly recommended for deployment.
 The cleanest setup is to make the contents of this folder the root of a
 dedicated GitHub repository.
 
-1. Create a private GitHub repository and push this folder's contents.
+1. Create a GitHub repository and push this folder's contents. Community Cloud
+   supports unlimited public apps but only one private app per workspace on
+   the free tier, so use a public repository when that private slot is already
+   occupied. Runtime secrets and ledger data remain excluded either way.
 2. Create a PostgreSQL database and copy its SSL-enabled connection URL.
 3. Open [share.streamlit.io](https://share.streamlit.io), choose **Create app**,
    and select the repository, branch, and `app.py` entrypoint.
