@@ -32,6 +32,9 @@ real payment processing are intentionally outside this first version.
 - `app.py` is a thin Streamlit host and validated action adapter.
 - `fairshare/domain.py` and `fairshare/storage.py` remain the authoritative
   ledger and persistence layers.
+- PostgreSQL connections are pooled for the life of the Streamlit process, and
+  each render or action reuses one transaction instead of reconnecting for
+  every storage call.
 - Streamlit Components v2 mounts the React app directly into the Streamlit
   page; there is no separate frontend server in production.
 - `frontend/dist/` is committed intentionally. Streamlit Community Cloud only

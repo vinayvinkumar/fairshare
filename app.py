@@ -132,20 +132,24 @@ def selected_group(store: LedgerStore) -> tuple[list[dict], dict]:
     if group_id not in valid_group_ids:
         group_id = groups[0]["id"]
         st.session_state["fairshare_group_id"] = group_id
-    group = store.get_group(group_id)
-    if not group:
-        raise RuntimeError("The selected FairShare group is unavailable.")
+    group = dict(next(group for group in groups if group["id"] == group_id))
+    group.pop("member_count", None)
     return groups, group
 
 
 def build_ready_payload(store: LedgerStore, password_enabled: bool) -> dict[str, Any]:
-    groups, group = selected_group(store)
-    owner_id = store.owner_member_id()
-    members = sort_members(store.group_members(group["id"]), owner_id)
-    all_members = sort_members(store.list_members(), owner_id)
-    ledger = store.group_ledger(group["id"])
-    expenses = ledger["expenses"]
-    settlements = ledger["settlements"]
+    with store.transaction():
+        groups, group = selected_group(store)
+        owner_id = store.owner_member_id()
+        group_members = store.group_members(group["id"])
+        stored_members = store.list_members()
+        stored_expenses = store.list_expenses(group["id"], include_deleted=True)
+        stored_settlements = store.list_settlements(group["id"], include_deleted=True)
+
+    members = sort_members(group_members, owner_id)
+    all_members = sort_members(stored_members, owner_id)
+    expenses = [expense for expense in stored_expenses if not expense["deleted_at"]]
+    settlements = [settlement for settlement in stored_settlements if not settlement["deleted_at"]]
     balance_map = calculate_balances(expenses, settlements)
     balances = [
         {"member_id": member["id"], "name": member["name"], "amount_minor": balance_map.get(member["id"], 0)}
@@ -175,7 +179,7 @@ def build_ready_payload(store: LedgerStore, password_enabled: bool) -> dict[str,
         "settlements": settlements,
         "balances": balances,
         "debts": simplify_balances(balance_map),
-        "deleted_activity": store.deleted_activity(group["id"]),
+        "deleted_activity": store.deleted_activity_from_records(stored_expenses, stored_settlements),
         "category_totals": [
             {"category": category, "amount_minor": amount}
             for category, amount in sorted(category_totals.items(), key=lambda item: item[1], reverse=True)
@@ -188,7 +192,10 @@ def build_ready_payload(store: LedgerStore, password_enabled: bool) -> dict[str,
         "currencies": CURRENCIES,
         "storage": {"backend": store.backend, "label": store.storage_label},
         "security": {"password_enabled": password_enabled},
-        "exports": {"json": store.export_payload(group["id"]), "csv": export_csv(expenses, settlements)},
+        "exports": {
+            "json": store.export_payload_from_records(group, group_members, stored_expenses, stored_settlements),
+            "csv": export_csv(expenses, settlements),
+        },
         "flash": take_flash(),
     }
 
@@ -353,7 +360,11 @@ result = fairshare_ui(
 
 if result.action:
     try:
-        handle_action(dict(result.action), store, expected_password)
+        if store is None:
+            handle_action(dict(result.action), store, expected_password)
+        else:
+            with store.transaction():
+                handle_action(dict(result.action), store, expected_password)
     except (ValidationError, ValueError, RuntimeError) as error:
         set_flash("error", str(error))
     st.rerun()

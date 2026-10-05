@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -99,12 +101,24 @@ def clean_text(value: object, field_name: str, maximum: int = 120) -> str:
     return text
 
 
+@dataclass
+class _TransactionState:
+    connection: object
+    rollback_only: bool = False
+
+
 class LedgerStore:
     def __init__(self, database_url: str | None = None, sqlite_path: str | Path = "data/fairshare.db"):
         self.database_url = (database_url or "").strip()
         self.sqlite_path = Path(sqlite_path)
         self.backend = "postgresql" if self.database_url.startswith(("postgres://", "postgresql://")) else "sqlite"
         self._lock = RLock()
+        self._transaction_state: ContextVar[_TransactionState | None] = ContextVar(
+            f"fairshare_transaction_{id(self)}",
+            default=None,
+        )
+        self._owner_member_id: str | None = None
+        self._pool = self._create_pool() if self.backend == "postgresql" else None
         if self.backend == "sqlite":
             self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -112,36 +126,76 @@ class LedgerStore:
     def storage_label(self) -> str:
         return "Cloud PostgreSQL" if self.backend == "postgresql" else "Local SQLite"
 
-    def _connect(self):
-        if self.backend == "postgresql":
-            try:
-                import psycopg
-                from psycopg.rows import dict_row
-            except ImportError as error:
-                raise RuntimeError("PostgreSQL storage requires psycopg. Install the packages in requirements.txt.") from error
-            url = self.database_url.replace("postgres://", "postgresql://", 1)
-            return psycopg.connect(url, row_factory=dict_row)
+    def _create_pool(self):
+        try:
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+        except ImportError as error:
+            raise RuntimeError(
+                "PostgreSQL storage requires psycopg and psycopg-pool. Install the packages in requirements.txt."
+            ) from error
 
+        url = self.database_url.replace("postgres://", "postgresql://", 1)
+        return ConnectionPool(
+            conninfo=url,
+            min_size=0,
+            max_size=4,
+            timeout=30,
+            kwargs={"row_factory": dict_row},
+            check=ConnectionPool.check_connection,
+            open=True,
+        )
+
+    def _connect(self):
         connection = sqlite3.connect(self.sqlite_path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
+
+    @contextmanager
+    def _connection(self):
+        if self.backend == "postgresql":
+            if self._pool is None:
+                raise RuntimeError("PostgreSQL connection pool is unavailable.")
+            with self._pool.connection() as connection:
+                yield connection
+            return
+
+        connection = self._connect()
+        try:
+            yield connection
+        finally:
+            connection.close()
 
     def _sql(self, query: str) -> str:
         return query.replace("?", "%s") if self.backend == "postgresql" else query
 
     @contextmanager
     def transaction(self):
-        with self._lock:
-            connection = self._connect()
+        active_state = self._transaction_state.get()
+        if active_state is not None:
             try:
-                yield connection
-                connection.commit()
+                yield active_state.connection
             except Exception:
-                connection.rollback()
+                active_state.rollback_only = True
                 raise
-            finally:
-                connection.close()
+            return
+
+        lock = self._lock if self.backend == "sqlite" else nullcontext()
+        with lock:
+            with self._connection() as connection:
+                state = _TransactionState(connection)
+                token = self._transaction_state.set(state)
+                try:
+                    yield connection
+                    if state.rollback_only:
+                        raise RuntimeError("Transaction rolled back because a nested operation failed.")
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+                finally:
+                    self._transaction_state.reset(token)
 
     def _execute(self, connection, query: str, parameters: Iterable[object] = ()):
         return connection.execute(self._sql(query), tuple(parameters))
@@ -161,33 +215,36 @@ class LedgerStore:
                 ("owner_member_id",),
             ).fetchone()
             if owner_row:
-                return
-
-            owner_id = uuid4().hex
-            group_id = uuid4().hex
-            created_at = utc_now()
-            self._execute(
-                connection,
-                "INSERT INTO members (id, name, email, created_at) VALUES (?, ?, ?, ?)",
-                (owner_id, clean_text(owner_name, "Owner name"), None, created_at),
-            )
-            self._execute(
-                connection,
-                "INSERT INTO groups (id, name, emoji, currency, created_at) VALUES (?, ?, ?, ?, ?)",
-                (group_id, "My first group", "✨", default_currency.upper(), created_at),
-            )
-            self._execute(
-                connection,
-                "INSERT INTO group_members (group_id, member_id, created_at) VALUES (?, ?, ?)",
-                (group_id, owner_id, created_at),
-            )
-            self._execute(
-                connection,
-                "INSERT INTO app_settings (key, value) VALUES (?, ?)",
-                ("owner_member_id", owner_id),
-            )
+                owner_id = self._as_dict(owner_row)["value"]
+            else:
+                owner_id = uuid4().hex
+                group_id = uuid4().hex
+                created_at = utc_now()
+                self._execute(
+                    connection,
+                    "INSERT INTO members (id, name, email, created_at) VALUES (?, ?, ?, ?)",
+                    (owner_id, clean_text(owner_name, "Owner name"), None, created_at),
+                )
+                self._execute(
+                    connection,
+                    "INSERT INTO groups (id, name, emoji, currency, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (group_id, "My first group", "✨", default_currency.upper(), created_at),
+                )
+                self._execute(
+                    connection,
+                    "INSERT INTO group_members (group_id, member_id, created_at) VALUES (?, ?, ?)",
+                    (group_id, owner_id, created_at),
+                )
+                self._execute(
+                    connection,
+                    "INSERT INTO app_settings (key, value) VALUES (?, ?)",
+                    ("owner_member_id", owner_id),
+                )
+        self._owner_member_id = owner_id
 
     def owner_member_id(self) -> str:
+        if self._owner_member_id:
+            return self._owner_member_id
         with self.transaction() as connection:
             row = self._execute(
                 connection,
@@ -196,7 +253,8 @@ class LedgerStore:
             ).fetchone()
         if not row:
             raise RuntimeError("FairShare has not been initialized.")
-        return self._as_dict(row)["value"]
+        self._owner_member_id = self._as_dict(row)["value"]
+        return self._owner_member_id
 
     def list_members(self) -> list[dict]:
         with self.transaction() as connection:
@@ -271,9 +329,9 @@ class LedgerStore:
         return [self._as_dict(row) for row in rows]
 
     def add_members_to_group(self, group_id: str, member_ids: Iterable[str]) -> None:
-        existing = {member["id"] for member in self.group_members(group_id)}
-        created_at = utc_now()
         with self.transaction() as connection:
+            existing = {member["id"] for member in self.group_members(group_id)}
+            created_at = utc_now()
             for member_id in dict.fromkeys(member_ids):
                 if member_id in existing:
                     continue
@@ -416,10 +474,11 @@ class LedgerStore:
         return [self._as_dict(row) for row in rows]
 
     def group_ledger(self, group_id: str) -> dict[str, list[dict]]:
-        return {
-            "expenses": self.list_expenses(group_id),
-            "settlements": self.list_settlements(group_id),
-        }
+        with self.transaction():
+            return {
+                "expenses": self.list_expenses(group_id),
+                "settlements": self.list_settlements(group_id),
+            }
 
     def soft_delete(self, record_type: str, record_id: str) -> None:
         table = {"expense": "expenses", "settlement": "settlements"}.get(record_type)
@@ -439,13 +498,8 @@ class LedgerStore:
         with self.transaction() as connection:
             self._execute(connection, f"UPDATE {table} SET deleted_at = NULL WHERE id = ?", (record_id,))
 
-    def deleted_activity(self, group_id: str) -> list[dict]:
-        expenses = [expense for expense in self.list_expenses(group_id, include_deleted=True) if expense["deleted_at"]]
-        settlements = [
-            settlement
-            for settlement in self.list_settlements(group_id, include_deleted=True)
-            if settlement["deleted_at"]
-        ]
+    @staticmethod
+    def deleted_activity_from_records(expenses: list[dict], settlements: list[dict]) -> list[dict]:
         activity = [
             {
                 "id": expense["id"],
@@ -457,6 +511,7 @@ class LedgerStore:
                 "deleted_at": expense["deleted_at"],
             }
             for expense in expenses
+            if expense["deleted_at"]
         ]
         activity.extend(
             {
@@ -469,17 +524,37 @@ class LedgerStore:
                 "deleted_at": settlement["deleted_at"],
             }
             for settlement in settlements
+            if settlement["deleted_at"]
         )
         return sorted(activity, key=lambda item: (item["deleted_at"], item["date"]), reverse=True)
 
-    def export_payload(self, group_id: str) -> str:
-        group = self.get_group(group_id)
+    def deleted_activity(self, group_id: str) -> list[dict]:
+        with self.transaction():
+            expenses = self.list_expenses(group_id, include_deleted=True)
+            settlements = self.list_settlements(group_id, include_deleted=True)
+        return self.deleted_activity_from_records(expenses, settlements)
+
+    @staticmethod
+    def export_payload_from_records(
+        group: dict | None,
+        members: list[dict],
+        expenses: list[dict],
+        settlements: list[dict],
+    ) -> str:
         payload = {
             "format": "fairshare-backup-v1",
             "exported_at": utc_now(),
             "group": group,
-            "members": self.group_members(group_id),
-            "expenses": self.list_expenses(group_id, include_deleted=True),
-            "settlements": self.list_settlements(group_id, include_deleted=True),
+            "members": members,
+            "expenses": expenses,
+            "settlements": settlements,
         }
         return json.dumps(payload, indent=2, ensure_ascii=False)
+
+    def export_payload(self, group_id: str) -> str:
+        with self.transaction():
+            group = self.get_group(group_id)
+            members = self.group_members(group_id)
+            expenses = self.list_expenses(group_id, include_deleted=True)
+            settlements = self.list_settlements(group_id, include_deleted=True)
+        return self.export_payload_from_records(group, members, expenses, settlements)
