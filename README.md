@@ -4,6 +4,9 @@ FairShare is a private, React-based group expense ledger hosted by Streamlit.
 It is inspired by the core workflow of shared-expense products, is an original
 application, and is not affiliated with Splitwise, Inc.
 
+- Live app: [fairshare-fsl2zfdazomwokbngzphfs.streamlit.app](https://fairshare-fsl2zfdazomwokbngzphfs.streamlit.app/)
+- Source: [github.com/vinayvinkumar/fairshare](https://github.com/vinayvinkumar/fairshare)
+
 ## What it includes
 
 - Reusable people and separate groups for trips, homes, meals, and events.
@@ -17,6 +20,7 @@ application, and is not affiliated with Splitwise, Inc.
   Cloud.
 - Optional passcode protection configured only through Streamlit secrets.
 - A responsive React interface designed for desktop and mobile.
+- An installable, online-first PWA experience with branded home-screen icons.
 
 Receipt scanning, bank imports, currency conversion, recurring expenses, and
 real payment processing are intentionally outside this first version.
@@ -32,6 +36,8 @@ real payment processing are intentionally outside this first version.
   page; there is no separate frontend server in production.
 - `frontend/dist/` is committed intentionally. Streamlit Community Cloud only
   needs Python at deploy time and serves this prebuilt bundle from `app.py`.
+- `static/manifest.webmanifest` and `static/icons/` provide PWA metadata and
+  install icons through Streamlit's static-file route.
 
 After changing `frontend/src/`, rebuild and commit the generated assets:
 
@@ -57,6 +63,17 @@ bundle before starting Streamlit.
 
 The app creates `data/fairshare.db` in local mode. This file is ignored and
 must never be committed.
+
+## Install as an app
+
+FairShare is an installable, online-first progressive web app. Open **Settings**
+and use **Install app** when the browser offers it. On iPhone or iPad, open the
+site in Safari, tap **Share**, then choose **Add to Home Screen**.
+
+The installed app opens in a focused standalone window and keeps the same
+passcode protection and cloud PostgreSQL ledger. An internet connection is
+still required because Streamlit hosts the application runtime and Neon hosts
+the durable data; offline ledger edits are intentionally not supported.
 
 ## Configure secrets
 
@@ -95,7 +112,8 @@ dedicated GitHub repository.
 
 No Node.js build runs on Streamlit Community Cloud. Ensure the checked-in
 `frontend/dist/fairshare.js` and `frontend/dist/fairshare.css` are current
-before pushing a deployment.
+before pushing a deployment. Keep `server.enableStaticServing = true` in
+`.streamlit/config.toml` so the manifest and install icons remain available.
 
 If the whole Cockpit later becomes a Git repository, Community Cloud also
 supports `apps/fairshare/app.py` as a subdirectory entrypoint and can read the
@@ -132,5 +150,5 @@ npm run build
 ```
 
 The build creates the production React bundle, compiles the Python files, and
-runs the domain/storage tests. The test command runs both JavaScript domain
-tests and Python domain/storage tests.
+runs the domain/storage tests. The test command runs the JavaScript domain and
+PWA URL tests plus the Python domain/storage tests.

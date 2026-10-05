@@ -42,6 +42,7 @@ import {
   splitPreview,
   toMinorUnits,
 } from "./domain.js";
+import { applyPwaMetadata, isIosDevice, isStandaloneMode } from "./pwa.js";
 
 const NAVIGATION = [
   { id: "overview", label: "Overview", icon: Home },
@@ -80,6 +81,52 @@ function useAction(sendAction, page, renderId) {
     sendAction({ ...action, view: page });
   };
   return [dispatch, pending];
+}
+
+function usePwaInstall() {
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [installed, setInstalled] = useState(false);
+  const [ios, setIos] = useState(false);
+
+  useEffect(() => {
+    const hostWindow = applyPwaMetadata(window);
+    const handleInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+    const handleInstalled = () => {
+      setInstalled(true);
+      setInstallPrompt(null);
+    };
+    const eventWindows = new Set([window, hostWindow]);
+
+    setInstalled(isStandaloneMode(hostWindow));
+    setIos(isIosDevice(hostWindow.navigator));
+    for (const eventWindow of eventWindows) {
+      eventWindow.addEventListener("beforeinstallprompt", handleInstallPrompt);
+      eventWindow.addEventListener("appinstalled", handleInstalled);
+    }
+    return () => {
+      for (const eventWindow of eventWindows) {
+        eventWindow.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+        eventWindow.removeEventListener("appinstalled", handleInstalled);
+      }
+    };
+  }, []);
+
+  const requestInstall = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  };
+
+  return {
+    canInstall: Boolean(installPrompt),
+    installed,
+    ios,
+    requestInstall,
+  };
 }
 
 function Button({ children, variant = "primary", icon: Icon, className = "", ...props }) {
@@ -155,7 +202,7 @@ function Toast({ flash }) {
   );
 }
 
-function Login({ data, sendAction }) {
+function Login({ data, sendAction, pwa }) {
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
 
@@ -199,6 +246,7 @@ function Login({ data, sendAction }) {
           </Button>
         </form>
         <div className="login-card__trust"><LockKeyhole size={14} /> Protected by your Streamlit secret</div>
+        {pwa.canInstall && !pwa.installed ? <Button variant="soft" icon={Download} type="button" className="login-card__install" onClick={pwa.requestInstall}>Install FairShare</Button> : null}
       </section>
     </main>
   );
@@ -742,7 +790,7 @@ function PeoplePage({ data, dispatch, pending }) {
   );
 }
 
-function SettingsPage({ data, dispatch, pending }) {
+function SettingsPage({ data, dispatch, pending, pwa }) {
   const fileSlug = data.group.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "group";
   return (
     <>
@@ -750,6 +798,7 @@ function SettingsPage({ data, dispatch, pending }) {
       <section className="settings-grid">
         <article className="settings-card settings-card--accent"><span className="settings-card__icon"><Landmark size={22} /></span><div><span className="eyebrow">Storage</span><h2>{data.storage.label}</h2><p>{data.storage.backend === "postgresql" ? "Your ledger is connected to durable cloud PostgreSQL storage." : "Your ledger stays in a private SQLite file on this Mac."}</p><StatusPill tone="green" icon={CheckCircle2}>{data.storage.backend === "postgresql" ? "Cloud persistence active" : "Local-first mode"}</StatusPill></div></article>
         <article className="settings-card"><span className="settings-card__icon"><LockKeyhole size={22} /></span><div><span className="eyebrow">Access</span><h2>{data.security.password_enabled ? "Passcode protected" : "Local access only"}</h2><p>{data.security.password_enabled ? "A Streamlit secret protects this deployment." : "Set APP_PASSWORD before sharing a hosted URL."}</p>{data.security.password_enabled ? <Button variant="soft" icon={LogOut} disabled={pending} onClick={() => dispatch({ type: "lock" })}>Lock now</Button> : <StatusPill tone="amber">Configure before cloud sharing</StatusPill>}</div></article>
+        <article className="settings-card settings-card--install"><span className="settings-card__icon"><Download size={22} /></span><div><span className="eyebrow">Progressive web app</span><h2>{pwa.installed ? "FairShare is installed" : "Install FairShare"}</h2><p>{pwa.installed ? "FairShare opens in its own app window from your home screen or app launcher." : "Add FairShare to your home screen or desktop for a focused, app-like experience. Your cloud ledger still needs an internet connection."}</p>{pwa.installed ? <StatusPill tone="green" icon={CheckCircle2}>Installed</StatusPill> : pwa.canInstall ? <Button variant="soft" icon={Download} onClick={pwa.requestInstall}>Install app</Button> : <div className="install-instructions"><strong>{pwa.ios ? "Safari" : "Browser menu"}</strong><span>{pwa.ios ? "Tap Share, then Add to Home Screen." : "Choose Install app or Add to Home Screen."}</span></div>}</div></article>
       </section>
       <section className="section-block">
         <div className="section-heading"><div><span className="eyebrow">Your data</span><h2>Download a portable copy</h2></div></div>
@@ -763,7 +812,7 @@ function SettingsPage({ data, dispatch, pending }) {
   );
 }
 
-function ReadyApp({ data, sendAction }) {
+function ReadyApp({ data, sendAction, pwa }) {
   const [page, setPage] = useState(data.page || "overview");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dispatch, pending] = useAction(sendAction, page, data.render_id);
@@ -785,7 +834,7 @@ function ReadyApp({ data, sendAction }) {
           {page === "add-expense" ? <AddExpensePage key={pageKey} data={data} dispatch={dispatch} pending={pending} /> : null}
           {page === "settle" ? <SettlePage key={pageKey} data={data} dispatch={dispatch} pending={pending} /> : null}
           {page === "people" ? <PeoplePage key={pageKey} data={data} dispatch={dispatch} pending={pending} /> : null}
-          {page === "settings" ? <SettingsPage key={pageKey} data={data} dispatch={dispatch} pending={pending} /> : null}
+          {page === "settings" ? <SettingsPage key={pageKey} data={data} dispatch={dispatch} pending={pending} pwa={pwa} /> : null}
         </main>
       </div>
       <Toast flash={data.flash} />
@@ -794,10 +843,11 @@ function ReadyApp({ data, sendAction }) {
 }
 
 export default function App({ data, sendAction }) {
+  const pwa = usePwaInstall();
   if (!data || data.mode === "loading") {
     return <div className="app-loading"><span className="brand-mark"><HandCoins size={24} /></span><strong>Opening FairShare…</strong></div>;
   }
-  if (data.mode === "locked") return <Login data={data} sendAction={sendAction} />;
+  if (data.mode === "locked") return <Login data={data} sendAction={sendAction} pwa={pwa} />;
   if (data.mode === "error") return <ErrorScreen data={data} />;
-  return <ReadyApp data={data} sendAction={sendAction} />;
+  return <ReadyApp data={data} sendAction={sendAction} pwa={pwa} />;
 }

@@ -1,0 +1,37 @@
+{
+  "id": "../../../../",
+  "name": "FairShare · Shared Expenses",
+  "short_name": "FairShare",
+  "description": "A private shared-expense ledger for groups, balances, and settlements.",
+  "start_url": "../../../../?source=pwa",
+  "scope": "../../../../",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#f5f6fa",
+  "theme_color": "#191927",
+  "orientation": "any",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["finance", "productivity", "utilities"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icons/fairshare-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/fairshare-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/fairshare-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

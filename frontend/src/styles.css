@@ -361,9 +361,13 @@ button { color: inherit; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .settings-card { display: flex; min-height: 220px; align-items: flex-start; gap: 16px; border: 1px solid var(--line); border-radius: 20px; background: white; padding: 24px; box-shadow: var(--shadow-sm); }
 .settings-card--accent { background: linear-gradient(140deg, #fff, #f5f3ff); }
+.settings-card--install { grid-column: 1 / -1; min-height: 0; background: linear-gradient(135deg, #fff, #f8f7ff 58%, #fff4f6); }
 .settings-card__icon, .download-icon { display: inline-grid; width: 46px; height: 46px; flex: 0 0 auto; place-items: center; border-radius: 14px; background: var(--primary-soft); color: var(--primary); }
 .settings-card h2 { margin: 0; font-family: "Manrope", sans-serif; font-size: 20px; letter-spacing: -.035em; }
 .settings-card p { margin: 8px 0 16px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.install-instructions { display: inline-flex; align-items: center; gap: 8px; border-radius: 12px; background: var(--primary-soft); padding: 9px 12px; color: var(--primary); font-size: 10px; }
+.install-instructions strong { font-size: 10px; }
+.install-instructions span { color: #5d5687; }
 .download-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .download-grid > button { display: flex; align-items: center; gap: 13px; border: 1px solid var(--line); border-radius: 17px; background: white; padding: 17px; cursor: pointer; text-align: left; box-shadow: var(--shadow-sm); }
 .download-grid > button > div { min-width: 0; flex: 1; }
@@ -394,6 +398,7 @@ button { color: inherit; }
 .input-with-icon input { min-width: 0; flex: 1; border: 0; outline: 0; padding: 12px 0; font-size: 12px; }
 .login-card form .button { margin-top: 6px; }
 .login-card__trust { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 20px; color: #9998a8; font-size: 9px; }
+.login-card__install { width: 100%; margin-top: 12px; }
 .app-loading { display: flex; min-height: 100vh; align-items: center; justify-content: center; gap: 12px; background: var(--canvas); }
 .app-loading strong { font-family: "Manrope", sans-serif; }
 .error-screen { display: grid; min-height: 100vh; place-items: center; background: radial-gradient(circle at 50% 0%, rgba(235, 88, 117, .1), transparent 24rem), var(--canvas); padding: 28px; }
@@ -457,6 +462,8 @@ button { color: inherit; }
   .activity-row__copy small { max-width: 150px; }
   .activity-row__amount { font-size: 10px; }
   .field-grid, .settings-grid, .download-grid, .groups-grid { grid-template-columns: 1fr; }
+  .settings-card--install { grid-column: auto; }
+  .install-instructions { align-items: flex-start; flex-direction: column; }
   .person-toggle-grid { grid-template-columns: 1fr; }
   .segmented-control { grid-template-columns: 1fr 1fr; }
   .ledger-toolbar { align-items: stretch; flex-direction: column; }
