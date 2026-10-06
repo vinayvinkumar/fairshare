@@ -15,7 +15,6 @@ import {
   Home,
   Landmark,
   LockKeyhole,
-  LogOut,
   Menu,
   Plus,
   ReceiptText,
@@ -199,56 +198,6 @@ function Toast({ flash }) {
       {flash.kind === "error" ? <X size={17} /> : <CheckCircle2 size={17} />}
       <span>{flash.message}</span>
     </div>
-  );
-}
-
-function Login({ data, sendAction, pwa }) {
-  const [password, setPassword] = useState("");
-  const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    setPending(false);
-  }, [data.render_id]);
-
-  const submit = (event) => {
-    event.preventDefault();
-    if (!password || pending) return;
-    setPending(true);
-    sendAction({ type: "unlock", password });
-  };
-
-  return (
-    <main className="login-screen">
-      <div className="login-orb login-orb--one" />
-      <div className="login-orb login-orb--two" />
-      <section className="login-card">
-        <div className="brand-mark brand-mark--large"><HandCoins size={30} /></div>
-        <span className="eyebrow">Private shared ledger</span>
-        <h1>Money between people,<br /><em>made lighter.</em></h1>
-        <p>One calm place for group expenses, honest balances, and clean settlements.</p>
-        <form onSubmit={submit}>
-          <label className="field-label" htmlFor="fairshare-passcode">Private passcode</label>
-          <div className="input-with-icon">
-            <LockKeyhole size={18} />
-            <input
-              id="fairshare-passcode"
-              autoFocus
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Enter your passcode"
-              autoComplete="current-password"
-            />
-          </div>
-          {data.flash?.kind === "error" ? <p className="form-error">{data.flash.message}</p> : null}
-          <Button type="submit" disabled={!password || pending} icon={pending ? RefreshCcw : ArrowRight}>
-            {pending ? "Unlocking…" : "Open FairShare"}
-          </Button>
-        </form>
-        <div className="login-card__trust"><LockKeyhole size={14} /> Protected by your Streamlit secret</div>
-        {pwa.canInstall && !pwa.installed ? <Button variant="soft" icon={Download} type="button" className="login-card__install" onClick={pwa.requestInstall}>Install FairShare</Button> : null}
-      </section>
-    </main>
   );
 }
 
@@ -797,7 +746,7 @@ function SettingsPage({ data, dispatch, pending, pwa }) {
       <PageIntro eyebrow="Control & portability" title="Settings" body="Know where your data lives, protect access, and keep your own backup." />
       <section className="settings-grid">
         <article className="settings-card settings-card--accent"><span className="settings-card__icon"><Landmark size={22} /></span><div><span className="eyebrow">Storage</span><h2>{data.storage.label}</h2><p>{data.storage.backend === "postgresql" ? "Your ledger is connected to durable cloud PostgreSQL storage." : "Your ledger stays in a private SQLite file on this Mac."}</p><StatusPill tone="green" icon={CheckCircle2}>{data.storage.backend === "postgresql" ? "Cloud persistence active" : "Local-first mode"}</StatusPill></div></article>
-        <article className="settings-card"><span className="settings-card__icon"><LockKeyhole size={22} /></span><div><span className="eyebrow">Access</span><h2>{data.security.password_enabled ? "Passcode protected" : "Local access only"}</h2><p>{data.security.password_enabled ? "A Streamlit secret protects this deployment." : "Set APP_PASSWORD before sharing a hosted URL."}</p>{data.security.password_enabled ? <Button variant="soft" icon={LogOut} disabled={pending} onClick={() => dispatch({ type: "lock" })}>Lock now</Button> : <StatusPill tone="amber">Configure before cloud sharing</StatusPill>}</div></article>
+        <article className="settings-card"><span className="settings-card__icon"><LockKeyhole size={22} /></span><div><span className="eyebrow">Access</span><h2>No app passcode</h2><p>Anyone who can reach this deployment can open and edit the shared ledger.</p><StatusPill tone="amber">Open access</StatusPill></div></article>
         <article className="settings-card settings-card--install"><span className="settings-card__icon"><Download size={22} /></span><div><span className="eyebrow">Progressive web app</span><h2>{pwa.installed ? "FairShare is installed" : "Install FairShare"}</h2><p>{pwa.installed ? "FairShare opens in its own app window from your home screen or app launcher." : "Add FairShare to your home screen or desktop for a focused, app-like experience. Your cloud ledger still needs an internet connection."}</p>{pwa.installed ? <StatusPill tone="green" icon={CheckCircle2}>Installed</StatusPill> : pwa.canInstall ? <Button variant="soft" icon={Download} onClick={pwa.requestInstall}>Install app</Button> : <div className="install-instructions"><strong>{pwa.ios ? "Safari" : "Browser menu"}</strong><span>{pwa.ios ? "Tap Share, then Add to Home Screen." : "Choose Install app or Add to Home Screen."}</span></div>}</div></article>
       </section>
       <section className="section-block">
@@ -847,7 +796,6 @@ export default function App({ data, sendAction }) {
   if (!data || data.mode === "loading") {
     return <div className="app-loading"><span className="brand-mark"><HandCoins size={24} /></span><strong>Opening FairShare…</strong></div>;
   }
-  if (data.mode === "locked") return <Login data={data} sendAction={sendAction} pwa={pwa} />;
   if (data.mode === "error") return <ErrorScreen data={data} />;
   return <ReadyApp data={data} sendAction={sendAction} pwa={pwa} />;
 }

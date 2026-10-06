@@ -5,15 +5,34 @@ import process from "node:process";
 import { spawnSync } from "node:child_process";
 
 export const appRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const localEnvironment = join(appRoot, ".venv");
+const localPython = process.platform === "win32"
+  ? join(localEnvironment, "Scripts", "python.exe")
+  : join(localEnvironment, "bin", "python");
+const pythonRequirementProbe = [
+  "import sys",
+  "assert sys.version_info >= (3, 12), f'Python 3.12 or newer is required; found {sys.version.split()[0]}'",
+];
+const defaultProbe = [
+  ...pythonRequirementProbe,
+  "print(sys.version.split()[0])",
+].join("; ");
+const fairShareProbe = [
+  ...pythonRequirementProbe,
+  "import streamlit",
+  "from streamlit.components import v2",
+  "print(streamlit.__version__)",
+].join("; ");
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
 function candidates() {
-  const localPython = process.platform === "win32"
-    ? join(appRoot, ".venv", "Scripts", "python.exe")
-    : join(appRoot, ".venv", "bin", "python");
+  const configuredPython = process.env.FAIRSHARE_PYTHON?.trim();
+  if (configuredPython) return [{ command: configuredPython, timeout: 120_000 }];
+  if (existsSync(localEnvironment)) return [{ command: localPython, timeout: 120_000 }];
+
   const common = process.platform === "win32"
     ? ["python", "python3"]
     : [
@@ -25,24 +44,43 @@ function candidates() {
         "python3",
         "python",
       ];
-  return unique([process.env.FAIRSHARE_PYTHON?.trim(), localPython, ...common]);
+  return unique(common).map((command) => ({ command, timeout: 30_000 }));
 }
 
-export function resolvePython(requiredModule = null) {
+function failureMessage(probe, timeout) {
+  if (probe.error?.code === "ETIMEDOUT") return `timed out after ${timeout / 1_000}s`;
+  const details = (probe.stderr || probe.error?.message || "unavailable")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  return details.at(-1) ?? "unavailable";
+}
+
+export function resolvePython(options = {}) {
+  const normalizedOptions = typeof options === "string" ? { requiredModule: options } : options;
+  const requiredModule = normalizedOptions.requiredModule ?? null;
+  const statement = normalizedOptions.validationStatement
+    ?? (requiredModule
+      ? [...pythonRequirementProbe, `import ${requiredModule}`, `print(${requiredModule}.__version__)`].join("; ")
+      : defaultProbe);
+  const requirement = normalizedOptions.requirement
+    ?? (requiredModule ? `Python 3.12 or newer with ${requiredModule}` : "Python 3.12 or newer");
   const failures = [];
-  for (const command of candidates()) {
-    if (command.includes("/") && !existsSync(command)) continue;
-    const statement = requiredModule
-      ? `import ${requiredModule}; print(${requiredModule}.__version__)`
-      : "import sys; print(sys.version.split()[0])";
+  for (const { command, timeout } of candidates()) {
     const probe = spawnSync(command, ["-c", statement], {
       cwd: appRoot,
       encoding: "utf8",
-      timeout: 15_000,
+      timeout,
     });
     if (probe.status === 0) return { command, version: probe.stdout.trim() };
-    failures.push(`${command}: ${(probe.stderr || probe.error?.message || "unavailable").split("\n")[0]}`);
+    failures.push(`${command}: ${failureMessage(probe, timeout)}`);
   }
-  const dependency = requiredModule ? ` with ${requiredModule}` : "";
-  throw new Error(`Could not find Python${dependency}. ${failures.join(" | ")}`);
+  throw new Error(`Could not find ${requirement}. ${failures.join(" | ")}`);
+}
+
+export function resolveFairShareRuntime() {
+  return resolvePython({
+    validationStatement: fairShareProbe,
+    requirement: "Python 3.12 or newer with Streamlit Components v2",
+  });
 }

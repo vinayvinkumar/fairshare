@@ -18,7 +18,7 @@ application, and is not affiliated with Splitwise, Inc.
 - Soft deletion with a Trash view so an accidental deletion can be restored.
 - Local SQLite storage and durable PostgreSQL storage for Streamlit Community
   Cloud.
-- Optional passcode protection configured only through Streamlit secrets.
+- No app-level passcode; hosting access controls determine who can reach it.
 - A responsive React interface designed for desktop and mobile.
 - An installable, online-first PWA experience with branded home-screen icons.
 
@@ -61,8 +61,9 @@ streamlit run app.py --server.port 5181
 ```
 
 From the Cockpit root, `npm --workspace @vinay/fairshare run dev` uses the
-workspace `.venv` automatically when it is present and rebuilds the React
-bundle before starting Streamlit.
+workspace `.venv` and the checked-in React bundle. Run `npm run build:ui`
+after changing `frontend/src/`; supervised service restarts intentionally skip
+that expensive build so FairShare returns quickly under OneDrive I/O pressure.
 
 The app creates `data/fairshare.db` in local mode. This file is ignored and
 must never be committed.
@@ -74,9 +75,9 @@ and use **Install app** when the browser offers it. On iPhone or iPad, open the
 site in Safari, tap **Share**, then choose **Add to Home Screen**.
 
 The installed app opens in a focused standalone window and keeps the same
-passcode protection and cloud PostgreSQL ledger. An internet connection is
-still required because Streamlit hosts the application runtime and Neon hosts
-the durable data; offline ledger edits are intentionally not supported.
+cloud PostgreSQL ledger. An internet connection is still required because
+Streamlit hosts the application runtime and Neon hosts the durable data;
+offline ledger edits are intentionally not supported.
 
 ## Configure secrets
 
@@ -84,7 +85,6 @@ Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` for local
 development and replace every placeholder. Do not commit that file.
 
 ```toml
-APP_PASSWORD = "a-long-private-passphrase"
 OWNER_NAME = "Owner"
 DEFAULT_CURRENCY = "INR"
 DATABASE_URL = "postgresql://user:password@host/database?sslmode=require"
@@ -107,11 +107,13 @@ dedicated GitHub repository.
 2. Create a PostgreSQL database and copy its SSL-enabled connection URL.
 3. Open [share.streamlit.io](https://share.streamlit.io), choose **Create app**,
    and select the repository, branch, and `app.py` entrypoint.
-4. In **Advanced settings**, choose Python 3.12 and paste the four secret values
+4. In **Advanced settings**, choose Python 3.12 and paste the three secret values
    shown above. Never commit `secrets.toml`.
-5. Deploy, open the generated URL, and enter `APP_PASSWORD`.
+5. Deploy and open the generated URL.
 6. Invite collaborators only if they should be able to edit the deployment;
-   everyone who knows the app passcode can use the shared ledger.
+   FairShare has no app-level passcode, so anyone who can reach the URL can use
+   the shared ledger. Use Streamlit's hosting access controls when privacy is
+   required.
 
 No Node.js build runs on Streamlit Community Cloud. Ensure the checked-in
 `frontend/dist/fairshare.js` and `frontend/dist/fairshare.css` are current

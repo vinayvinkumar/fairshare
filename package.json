@@ -7,7 +7,7 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "dev": "npm run build:ui && node scripts/start.mjs",
+    "dev": "node scripts/start.mjs",
     "start": "npm run build:ui && node scripts/start.mjs",
     "build": "npm run build:ui && node scripts/check.mjs",
     "build:ui": "vite build --config frontend/vite.config.js",

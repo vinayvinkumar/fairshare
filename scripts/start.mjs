@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
-import { appRoot, resolvePython } from "./python-runtime.mjs";
+import { appRoot, resolveFairShareRuntime } from "./python-runtime.mjs";
 
 let runtime;
 try {
-  runtime = resolvePython("streamlit");
+  runtime = resolveFairShareRuntime();
 } catch (error) {
   console.error(error.message);
-  console.error("Run `python -m pip install -r requirements.txt` inside apps/fairshare, or create apps/fairshare/.venv.");
+  console.error("Create apps/fairshare/.venv, then run `uv pip install --python .venv/bin/python -r requirements.txt`.");
   process.exit(1);
 }
 

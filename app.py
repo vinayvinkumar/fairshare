@@ -6,7 +6,6 @@ from io import StringIO
 import logging
 import os
 from pathlib import Path
-import secrets
 import time
 from typing import Any, Mapping
 
@@ -137,7 +136,7 @@ def selected_group(store: LedgerStore) -> tuple[list[dict], dict]:
     return groups, group
 
 
-def build_ready_payload(store: LedgerStore, password_enabled: bool) -> dict[str, Any]:
+def build_ready_payload(store: LedgerStore) -> dict[str, Any]:
     with store.transaction():
         groups, group = selected_group(store)
         owner_id = store.owner_member_id()
@@ -191,7 +190,7 @@ def build_ready_payload(store: LedgerStore, password_enabled: bool) -> dict[str,
         "categories": CATEGORIES,
         "currencies": CURRENCIES,
         "storage": {"backend": store.backend, "label": store.storage_label},
-        "security": {"password_enabled": password_enabled},
+        "security": {"password_enabled": False},
         "exports": {
             "json": store.export_payload_from_records(group, group_members, stored_expenses, stored_settlements),
             "csv": export_csv(expenses, settlements),
@@ -211,7 +210,7 @@ def mark_data_changed() -> None:
     st.session_state["fairshare_data_revision"] = st.session_state.get("fairshare_data_revision", 0) + 1
 
 
-def handle_action(action: Mapping[str, Any], store: LedgerStore | None, expected_password: str) -> None:
+def handle_action(action: Mapping[str, Any], store: LedgerStore | None) -> None:
     action_id = str(action.get("client_action_id", ""))
     if action_id and st.session_state.get("fairshare_last_action_id") == action_id:
         return
@@ -223,24 +222,9 @@ def handle_action(action: Mapping[str, Any], store: LedgerStore | None, expected
         st.session_state["fairshare_page"] = view
 
     action_type = str(action.get("type", ""))
-    if action_type == "unlock":
-        supplied_password = str(action.get("password", ""))
-        if expected_password and secrets.compare_digest(supplied_password, expected_password):
-            st.session_state["fairshare_authenticated"] = True
-            set_flash("success", "Welcome back. Your ledger is ready.")
-        else:
-            set_flash("error", "That passcode is not correct.")
-        return
-
-    if expected_password and not st.session_state.get("fairshare_authenticated"):
-        set_flash("error", "Unlock FairShare before making changes.")
-        return
     if store is None:
         raise RuntimeError("FairShare storage is unavailable.")
 
-    if action_type == "lock":
-        st.session_state["fairshare_authenticated"] = False
-        return
     if action_type == "select_group":
         group_id = require_string(action, "group_id")
         if not store.get_group(group_id):
@@ -326,28 +310,23 @@ def handle_action(action: Mapping[str, Any], store: LedgerStore | None, expected
     raise ValidationError("FairShare received an unsupported action.")
 
 
-expected_password = setting("APP_PASSWORD")
-authenticated = not expected_password or bool(st.session_state.get("fairshare_authenticated"))
 store: LedgerStore | None = None
 render_id = time.time_ns()
 
-if authenticated:
-    try:
-        store = create_store(
-            setting("DATABASE_URL"),
-            setting("SQLITE_PATH", str(APP_ROOT / "data" / "fairshare.db")),
-            setting("OWNER_NAME", "You"),
-            setting("DEFAULT_CURRENCY", "INR").upper(),
-        )
-        payload = build_ready_payload(store, bool(expected_password))
-    except Exception as error:
-        LOGGER.exception("FairShare could not open its ledger")
-        payload = {
-            "mode": "error",
-            "message": "Check the database connection and Streamlit secrets, then restart the app.",
-        }
-else:
-    payload = {"mode": "locked", "flash": take_flash()}
+try:
+    store = create_store(
+        setting("DATABASE_URL"),
+        setting("SQLITE_PATH", str(APP_ROOT / "data" / "fairshare.db")),
+        setting("OWNER_NAME", "You"),
+        setting("DEFAULT_CURRENCY", "INR").upper(),
+    )
+    payload = build_ready_payload(store)
+except Exception as error:
+    LOGGER.exception("FairShare could not open its ledger")
+    payload = {
+        "mode": "error",
+        "message": "Check the database connection and Streamlit secrets, then restart the app.",
+    }
 payload["render_id"] = render_id
 
 result = fairshare_ui(
@@ -361,10 +340,10 @@ result = fairshare_ui(
 if result.action:
     try:
         if store is None:
-            handle_action(dict(result.action), store, expected_password)
+            handle_action(dict(result.action), store)
         else:
             with store.transaction():
-                handle_action(dict(result.action), store, expected_password)
+                handle_action(dict(result.action), store)
     except (ValidationError, ValueError, RuntimeError) as error:
         set_flash("error", str(error))
     st.rerun()
